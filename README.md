@@ -5,10 +5,12 @@ Docker containerization of the Pacemaker High Availability Cluster Manager
 
 Creating a docker container image is trivial. Just run the pcmk_create_image.sh
 command. This script will spit out a .tar file which represents a containized
-pacemaker docker image.
+pacemaker docker image.So far, this project supports containers including centos7 
+and openSuse Leap. You can run ./pcmk_create_image.sh -d "vendor", values can be 
+"redhat" and "suse".We take centos7 as an example.
 
 ```
-./pcmk_create_image.sh 
+./pcmk_create_image.sh -d "redhat" 
 Making Dockerfile
 Making image
 Sending build context to Docker daemon 153.6 kB

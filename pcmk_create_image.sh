@@ -1,9 +1,115 @@
-#! /bin/bash
+#!/bin/bash
 
-ret=`cat /etc/issue | grep -i suse`
-is_suse=$?
-if [ $is_suse -eq 0 ]; then
-	./pcmk_create_opensuse_image.sh
+is_suse=""
+from="centos:centos7"
+rpms=""
+corosync_config=""
+export_file=""
+
+make_image()
+{
+	echo "Making Dockerfile"
+	rm -f Dockerfile
+
+	if [ -z "$corosync_config" ]; then
+		corosync_config="defaults/corosync.conf"
+	fi
+
+	echo "FROM $from" > Dockerfile
+
+	if [ $is_suse == "redhat" ]; then
+	    # this gets around a bug in rhel 7.0
+	    touch /etc/yum.repos.d/redhat.repo
+	fi
+
+	rm -rf repos
+	mkdir repos
+	if [ -n "$repodir" ]; then
+		cp $repodir/* repos/
+		if [ $is_suse == "redhat" ]; then
+		    echo "ADD /repos /etc/yum.repos.d/" >> Dockerfile
+		else
+		    echo "ADD /repos /etc/zypp/repos.d/" >> Dockerfile
+		fi
+	fi
+
+	rm -rf rpms
+	mkdir rpms
+	if [ -n "$rpmdir" ]; then
+		echo "ADD /rpms /root/" >> Dockerfile
+		if [ $is_suse == "redhat" ]; then
+		    echo "RUN yum install -y /root/*.rpm" >> Dockerfile
+		else
+		    echo "RUN zypper install -y /root/*.rpm" >> Dockerfile
+		fi
+		cp $rpmdir/* rpms/
+	fi
+
+	if [ $is_suse == "redhat" ]; then 
+	    echo "RUN yum install -y net-tools pacemaker resource-agents pcs corosync which fence-agents-common sysvinit-tools docker" >> Dockerfile
+	else
+	    echo "RUN zypper install -y net-tools conntrack-tools corosync crmsh csync2 ctdb drbd drbd-utils ha-cluster-bootstrap hawk ldirectord lvm2-clvm ocfs2-tools pacemaker pssh python-dateutil python-pssh resource-agents sbd yast2-cluster yast2-drbd yast2-iplb" >> Dockerfile
+	fi
+
+	echo "ADD /helper_scripts /usr/sbin" >> Dockerfile
+	echo "ADD $corosync_config /etc/corosync/" >> Dockerfile
+
+	echo "ENTRYPOINT /usr/sbin/pcmk_launch.sh" >> Dockerfile
+
+	# generate image
+	echo "Making image"
+	docker $doc_opts build .
+	if [ $? -ne 0 ]; then
+		echo "ERROR: failed to generate docker image"
+		exit 1
+	fi
+	image=$(docker $doc_opts images -q | head -n 1)
+
+	if [ -z "$export_file" ]; then
+		export_file="pcmk_container_${image}.tar"
+
+	fi
+	docker save $image > ${export_file}
+
+	echo "Docker container $image is exported to tar file ${export_file}"
+
+	# cleanup
+	rm -rf rpms repos
+}
+
+function helptext() {
+	echo "pcmk_create_image.sh - A tool for creating a pacemaker docker image."
+	echo ""
+	echo "Usage: pcmk_create_image.sh [options]"
+	echo ""
+	echo "Options:"
+	echo "-f, --from               Specify the FROM image to base the docker containers off of. Default is \"$from\""
+	echo "-o, --repo-copy          Copy the repos in this host directory into the image's /etc/yum.repos.d/ directory"
+	echo "-R, --rpm-copy           Copy rpms in this directory to image for install".
+	echo "-e, --export-file        Export pacemaker container image to this file path.".
+	echo ""
+	exit $1
+}
+
+while true ; do
+	case "$1" in
+	--help|-h|-\?) helptext 0;;
+	-f|--from) from="$2"; shift; shift;;
+	-o|--repo-copy) repodir=$2; shift; shift;;
+	-R|--rpm-copy) rpmdir=$2; shift; shift;;
+	-e|--export-file) export_file=$2; shift; shift;;
+	-d) is_suse=$2; shift;shift;;
+	"") break;;
+	*) 
+		echo "unknown option $1"
+		helptext 1;;
+	esac
+done
+
+if [ $is_suse == "suse" ]; then
+	from="opensuse:leap"
 else
-	./pcmk_create_centos_image.sh
+	from="centos:centos7"
 fi
+make_image
+
