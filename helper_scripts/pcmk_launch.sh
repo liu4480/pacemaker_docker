@@ -23,9 +23,9 @@ status()
 
 start()
 {
-	if [ -n "$nodelist" ]; then
-		pcs cluster setup --force --local --name k8master $nodelist
-	fi
+	#if [ -n "$nodelist" ]; then
+	#	pcs cluster setup --force --local --name k8master $nodelist
+	#fi
 
 	/usr/share/corosync/corosync start > /dev/null 2>&1
 	mkdir -p /var/run
@@ -73,6 +73,50 @@ stop()
 	killall -q -9 'corosync'
 	killall -q -9 'crmd stonithd attrd cib lrmd pacemakerd corosync'
 }
+
+echo "#! /usr/bin/python
+import os
+import sys
+import yaml
+
+def newconf(filepath, nodelist):
+    if os.path.exists(filepath) == False:
+        return -1
+    content = '''totem {
+    version: 2
+    secauth: off
+    cluster_name: docker
+    transport: udpu
+}\n\n'''
+    nodes = nodelist.split()
+    i = 1
+    content = content + '''nodelist {\n'''
+    for node in nodes:
+        content = content + '''    node {
+        ring0_addr: %s
+        nodeid: %d
+    }\n\n''' % (node,i)
+        i = i + 1
+    content = content + '}\n\n'
+    content = content + '''quorum {
+    provider: corosync_votequorum
+}
+
+logging {
+    to_logfile: yes
+    logfile: /var/log/corosync.log
+    to_syslog: yes
+}
+'''
+    f = open(filepath, 'w')
+    f.write(content)
+    f.close()
+    print len(sys.argv)
+newconf('/etc/corosync/corosync.conf', sys.argv[1])
+" > write_conf.py
+chmod +x write_conf.py
+echo $nodelist
+./write_conf.py "$nodelist"
 
 start
 
